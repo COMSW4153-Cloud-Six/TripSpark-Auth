@@ -4,6 +4,8 @@ import urllib.parse
 import urllib.request
 
 from flask import Flask, request, redirect, make_response
+import jwt
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
@@ -13,6 +15,7 @@ GOOGLE_TOKENINFO_ENDPOINT = "https://oauth2.googleapis.com/tokeninfo"
 
 CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
 CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET")
+AUTH_JWT_SECRET = os.environ.get("AUTH_JWT_SECRET", "dev-secret-change-me")
 
 
 def build_redirect_uri():
@@ -109,8 +112,24 @@ def oauth2_callback():
     except Exception as e:
         return f"Error calling tokeninfo: {e}", 500
 
+    # ===== Now we have user_info from Google =====
     email = user_info.get("email", "unknown")
     sub = user_info.get("sub", "unknown")
+
+    # === Create our own TripSpark JWT ===
+    now = datetime.utcnow()
+    payload = {
+        "sub": sub,
+        "email": email,
+        "iss": "tripspark-auth",
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(hours=1)).timestamp()),
+    }
+
+    if not AUTH_JWT_SECRET:
+        return "AUTH_JWT_SECRET not configured", 500
+
+    custom_jwt = jwt.encode(payload, AUTH_JWT_SECRET, algorithm="HS256")
 
     html = f"""
     <html>
@@ -118,7 +137,11 @@ def oauth2_callback():
         <h1>Logged in with Google</h1>
         <p><b>Email:</b> {email}</p>
         <p><b>Sub (Google user ID):</b> {sub}</p>
-        <h2>Raw user info</h2>
+
+        <h2>TripSpark JWT (our own token)</h2>
+        <p><code>{custom_jwt}</code></p>
+
+        <h2>Raw user info (from Google)</h2>
         <pre>{json.dumps(user_info, indent=2)}</pre>
       </body>
     </html>
@@ -129,5 +152,5 @@ def oauth2_callback():
 
 
 if __name__ == "__main__":
-    # For local testing 
+    # For local testing
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
